@@ -166,7 +166,7 @@ jobs:
             echo "${PKG}@${VER} already published; verifying instead of republishing."
             PUBLISH_SKIPPED=true
           else
-            if ! npm publish "$TARBALL_PATH" --access public --provenance --tag mb; then
+            if ! npm publish "$TARBALL_PATH" --access public --provenance --tag latest; then
               if npm view "${PKG}@${VER}" version >/dev/null 2>&1; then
                 echo "${PKG}@${VER} became visible after a publish race; continuing to verification."
                 PUBLISH_SKIPPED=true
@@ -191,28 +191,6 @@ jobs:
             exit 1
           fi
           echo "✓ ${PKG}@${VER} is visible on registry."
-
-          MB_TAG=$(npm view "${PKG}" dist-tags.mb 2>/dev/null || true)
-          if [[ "$MB_TAG" != "$VER" ]]; then
-            echo "Error: mb dist-tag for ${PKG} is '${MB_TAG}', expected '${VER}'."
-            echo "  Attempting to set mb dist-tag..."
-            if [[ -z "${NPM_DIST_TAG_TOKEN:-}" ]]; then
-              echo "Error: NPM_DIST_TAG_TOKEN secret is not set. Add it as a repository secret to allow dist-tag mutations."
-              exit 1
-            fi
-            NODE_AUTH_TOKEN="$NPM_DIST_TAG_TOKEN" npm dist-tag add "${PKG}@${VER}" mb
-            for i in $(seq 1 12); do
-              MB_TAG=$(npm view "${PKG}" dist-tags.mb 2>/dev/null || true)
-              if [[ "$MB_TAG" == "$VER" ]]; then break; fi
-              echo "  Waiting for mb dist-tag propagation (attempt ${i}/12)..."
-              sleep 5
-            done
-            if [[ "$MB_TAG" != "$VER" ]]; then
-              echo "Error: mb dist-tag still incorrect after correction attempt."
-              exit 1
-            fi
-          fi
-          echo "✓ mb dist-tag → ${VER}"
 
           LATEST_TAG=$(npm view "${PKG}" dist-tags.latest 2>/dev/null || true)
           if [[ "$LATEST_TAG" != "$VER" ]]; then
@@ -304,12 +282,7 @@ jobs:
             echo "Error: ${CORE_PKG}@${VER} is not resolvable from npm registry. Cannot publish OpenCode."
             exit 1
           fi
-          CORE_MB=$(npm view "${CORE_PKG}" dist-tags.mb 2>/dev/null || true)
-          if [[ "$CORE_MB" != "$VER" ]]; then
-            echo "Error: ${CORE_PKG} mb dist-tag is '${CORE_MB}', expected '${VER}'. Cannot publish OpenCode."
-            exit 1
-          fi
-          echo "✓ Core gate passed: ${CORE_PKG}@${VER} (mb → ${VER})"
+          echo "✓ Core gate passed: ${CORE_PKG}@${VER}"
 
       - name: Build
         run: bun run build
@@ -335,7 +308,7 @@ jobs:
             echo "${PKG}@${VER} already published; verifying instead of republishing."
             PUBLISH_SKIPPED=true
           else
-            if ! npm publish "$TARBALL_PATH" --access public --provenance --tag mb; then
+            if ! npm publish "$TARBALL_PATH" --access public --provenance --tag latest; then
               if npm view "${PKG}@${VER}" version >/dev/null 2>&1; then
                 echo "${PKG}@${VER} became visible after a publish race; continuing to verification."
                 PUBLISH_SKIPPED=true
@@ -360,28 +333,6 @@ jobs:
             exit 1
           fi
           echo "✓ ${PKG}@${VER} is visible on registry."
-
-          MB_TAG=$(npm view "${PKG}" dist-tags.mb 2>/dev/null || true)
-          if [[ "$MB_TAG" != "$VER" ]]; then
-            echo "Error: mb dist-tag for ${PKG} is '${MB_TAG}', expected '${VER}'."
-            echo "  Attempting to set mb dist-tag..."
-            if [[ -z "${NPM_DIST_TAG_TOKEN:-}" ]]; then
-              echo "Error: NPM_DIST_TAG_TOKEN secret is not set. Add it as a repository secret to allow dist-tag mutations."
-              exit 1
-            fi
-            NODE_AUTH_TOKEN="$NPM_DIST_TAG_TOKEN" npm dist-tag add "${PKG}@${VER}" mb
-            for i in $(seq 1 12); do
-              MB_TAG=$(npm view "${PKG}" dist-tags.mb 2>/dev/null || true)
-              if [[ "$MB_TAG" == "$VER" ]]; then break; fi
-              echo "  Waiting for mb dist-tag propagation (attempt ${i}/12)..."
-              sleep 5
-            done
-            if [[ "$MB_TAG" != "$VER" ]]; then
-              echo "Error: mb dist-tag still incorrect after correction attempt."
-              exit 1
-            fi
-          fi
-          echo "✓ mb dist-tag → ${VER}"
 
           LATEST_TAG=$(npm view "${PKG}" dist-tags.latest 2>/dev/null || true)
           if [[ "$LATEST_TAG" != "$VER" ]]; then

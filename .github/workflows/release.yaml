@@ -201,7 +201,12 @@ jobs:
               exit 1
             fi
             NODE_AUTH_TOKEN="$NPM_DIST_TAG_TOKEN" npm dist-tag add "${PKG}@${VER}" mb
-            MB_TAG=$(npm view "${PKG}" dist-tags.mb 2>/dev/null || true)
+            for i in $(seq 1 12); do
+              MB_TAG=$(npm view "${PKG}" dist-tags.mb 2>/dev/null || true)
+              if [[ "$MB_TAG" == "$VER" ]]; then break; fi
+              echo "  Waiting for mb dist-tag propagation (attempt ${i}/12)..."
+              sleep 5
+            done
             if [[ "$MB_TAG" != "$VER" ]]; then
               echo "Error: mb dist-tag still incorrect after correction attempt."
               exit 1
@@ -217,7 +222,12 @@ jobs:
               exit 1
             fi
             NODE_AUTH_TOKEN="$NPM_DIST_TAG_TOKEN" npm dist-tag add "${PKG}@${VER}" latest
-            LATEST_TAG=$(npm view "${PKG}" dist-tags.latest 2>/dev/null || true)
+            for i in $(seq 1 12); do
+              LATEST_TAG=$(npm view "${PKG}" dist-tags.latest 2>/dev/null || true)
+              if [[ "$LATEST_TAG" == "$VER" ]]; then break; fi
+              echo "  Waiting for latest dist-tag propagation (attempt ${i}/12)..."
+              sleep 5
+            done
             if [[ "$LATEST_TAG" != "$VER" ]]; then
               echo "Error: latest dist-tag still incorrect after correction attempt."
               exit 1
@@ -360,7 +370,12 @@ jobs:
               exit 1
             fi
             NODE_AUTH_TOKEN="$NPM_DIST_TAG_TOKEN" npm dist-tag add "${PKG}@${VER}" mb
-            MB_TAG=$(npm view "${PKG}" dist-tags.mb 2>/dev/null || true)
+            for i in $(seq 1 12); do
+              MB_TAG=$(npm view "${PKG}" dist-tags.mb 2>/dev/null || true)
+              if [[ "$MB_TAG" == "$VER" ]]; then break; fi
+              echo "  Waiting for mb dist-tag propagation (attempt ${i}/12)..."
+              sleep 5
+            done
             if [[ "$MB_TAG" != "$VER" ]]; then
               echo "Error: mb dist-tag still incorrect after correction attempt."
               exit 1
@@ -376,7 +391,12 @@ jobs:
               exit 1
             fi
             NODE_AUTH_TOKEN="$NPM_DIST_TAG_TOKEN" npm dist-tag add "${PKG}@${VER}" latest
-            LATEST_TAG=$(npm view "${PKG}" dist-tags.latest 2>/dev/null || true)
+            for i in $(seq 1 12); do
+              LATEST_TAG=$(npm view "${PKG}" dist-tags.latest 2>/dev/null || true)
+              if [[ "$LATEST_TAG" == "$VER" ]]; then break; fi
+              echo "  Waiting for latest dist-tag propagation (attempt ${i}/12)..."
+              sleep 5
+            done
             if [[ "$LATEST_TAG" != "$VER" ]]; then
               echo "Error: latest dist-tag still incorrect after correction attempt."
               exit 1

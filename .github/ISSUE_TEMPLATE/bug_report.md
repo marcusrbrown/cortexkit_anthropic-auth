@@ -28,11 +28,11 @@ assignees: ''
 - [ ] Login/auth flow
 - [ ] Fallback accounts
 - [ ] Quotas
-- [ ] Prompt cache / cachekeep
+- [ ] Prompt cache / cachekeep (cache behavior)
 - [ ] Fast mode
-- [ ] Dumps
-- [ ] Relay
-- [ ] Request rewriting
+- [ ] Dumps (debug dump output)
+- [ ] Relay (upstream relay/proxy path)
+- [ ] Request rewriting (request transform rules)
 
 **Describe the bug**
 A clear and concise description of what happened.
@@ -48,7 +48,7 @@ What did you expect to happen?
 **Sanitized logs/errors**
 Paste relevant logs or errors (sanitized).
 
-⚠️ **Do not include secrets**: OAuth access tokens, refresh tokens, local auth files, `.env` values, or mitmproxy/system-prompt captures.
+⚠️ **Do not include secrets**: OAuth access tokens, refresh tokens, local auth files, `.env` values, or mitmproxy/system-prompt captures (captured traffic or prompt dumps).
 
 **Additional context**
 Anything else that may help.

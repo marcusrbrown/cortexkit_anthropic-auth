@@ -906,6 +906,163 @@ describe('FallbackAccountManager', () => {
       'Claude OAuth refresh failed: 400 — invalid_grant',
     )
   })
+
+  test('getUsableFallbackAccounts returns refreshed credentials when token refresh succeeds and quota refresh fails transiently with cached passing quota', async () => {
+    const storage = baseStorage()
+    storage.accounts.push({
+      id: 'stale-token-good-cached-quota',
+      type: 'oauth',
+      access: 'old-access',
+      refresh: 'old-refresh',
+      expires: 1_600_000,
+      quota: {
+        five_hour: {
+          usedPercent: 10,
+          remainingPercent: 90,
+          checkedAt: 1_000,
+          resetsAt: '2099-01-01T00:00:00Z',
+        },
+        seven_day: {
+          usedPercent: 20,
+          remainingPercent: 80,
+          checkedAt: 1_000,
+          resetsAt: '2099-01-01T00:00:00Z',
+        },
+      },
+    })
+    await saveAccounts(storage)
+
+    const fetchImpl = mock(
+      (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input)
+        if (url.includes('/api/oauth/usage')) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                error: { type: 'rate_limit_error', message: 'Rate limited' },
+              }),
+              { status: 429 },
+            ),
+          )
+        }
+        expect(url).toBe('https://platform.claude.com/v1/oauth/token')
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              access_token: 'new-access',
+              refresh_token: 'new-refresh',
+              expires_in: 3600,
+            }),
+            { status: 200 },
+          ),
+        )
+      },
+    ) as unknown as typeof fetch
+
+    const manager = new FallbackAccountManager({
+      fetchImpl,
+      now: () => 10 * 60_000,
+    })
+
+    const accounts = await manager.getUsableFallbackAccounts()
+
+    expect(accounts).toHaveLength(1)
+    // Must return refreshed credentials, NOT stale pre-refresh ones
+    expect(accounts[0]?.access).toBe('new-access')
+    expect(accounts[0]?.refresh).toBe('new-refresh')
+
+    const saved = await loadAccounts()
+    expect(saved?.accounts[0]?.access).toBe('new-access')
+    expect(saved?.accounts[0]?.refresh).toBe('new-refresh')
+  })
+
+  test('refreshQuotaForAllAccounts does not overwrite refreshed credentials with stale account when quota probe fails after token refresh', async () => {
+    const storage = baseStorage()
+    storage.accounts.push({
+      id: 'stale-token-quota-probe-fails',
+      type: 'oauth',
+      access: 'old-access',
+      refresh: 'old-refresh',
+      expires: 1_600_000,
+    })
+    await saveAccounts(storage)
+
+    const fetchImpl = mock(
+      (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input)
+        if (url.includes('/api/oauth/usage')) {
+          return Promise.resolve(new Response('server error', { status: 500 }))
+        }
+        expect(url).toBe('https://platform.claude.com/v1/oauth/token')
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              access_token: 'new-access',
+              refresh_token: 'new-refresh',
+              expires_in: 3600,
+            }),
+            { status: 200 },
+          ),
+        )
+      },
+    ) as unknown as typeof fetch
+
+    const manager = new FallbackAccountManager({
+      fetchImpl,
+      now: () => 10 * 60_000,
+    })
+
+    await manager.refreshQuotaForAllAccounts()
+
+    const saved = await loadAccounts()
+    expect(saved?.accounts[0]?.access).toBe('new-access')
+    expect(saved?.accounts[0]?.refresh).toBe('new-refresh')
+    expect(saved?.accounts[0]?.lastQuotaRefreshError).toBeDefined()
+  })
+
+  test('refreshDueAccounts does not overwrite refreshed credentials with stale account when quota probe fails after token refresh', async () => {
+    const storage = baseStorage()
+    storage.accounts.push({
+      id: 'stale-token-due-quota-probe-fails',
+      type: 'oauth',
+      access: 'old-access',
+      refresh: 'old-refresh',
+      expires: 1_600_000,
+    })
+    await saveAccounts(storage)
+
+    const fetchImpl = mock(
+      (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input)
+        if (url.includes('/api/oauth/usage')) {
+          return Promise.resolve(new Response('server error', { status: 500 }))
+        }
+        expect(url).toBe('https://platform.claude.com/v1/oauth/token')
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              access_token: 'new-access',
+              refresh_token: 'new-refresh',
+              expires_in: 3600,
+            }),
+            { status: 200 },
+          ),
+        )
+      },
+    ) as unknown as typeof fetch
+
+    const manager = new FallbackAccountManager({
+      fetchImpl,
+      now: () => 10 * 60_000,
+    })
+
+    await manager.refreshQuotaForDueAccounts()
+
+    const saved = await loadAccounts()
+    expect(saved?.accounts[0]?.access).toBe('new-access')
+    expect(saved?.accounts[0]?.refresh).toBe('new-refresh')
+    expect(saved?.accounts[0]?.lastQuotaRefreshError).toBeDefined()
+  })
 })
 
 describe('buildRefreshOperationError', () => {

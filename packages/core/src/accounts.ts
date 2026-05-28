@@ -889,8 +889,8 @@ export class FallbackAccountManager {
 
     for (const account of storage.accounts) {
       if (account.enabled === false) continue
+      let next = account
       try {
-        let next = account
         if (tokenNeedsRefresh(next, storage, this.now())) {
           const refreshError = next.lastRefreshError
           if (
@@ -925,9 +925,9 @@ export class FallbackAccountManager {
               error: formatErrorMessage(error),
             },
           )
-          usable.push(account)
+          usable.push(next)
         } else if (!failClosedOnUnknownQuota(storage)) {
-          usable.push(account)
+          usable.push(next)
         }
       }
     }
@@ -1023,8 +1023,8 @@ export class FallbackAccountManager {
         await this.refreshAccountQuota(next, storage)
         changed = true
       } catch (error) {
-        recordQuotaRefreshError(account, error, this.now())
-        updateStoredAccount(storage, account)
+        recordQuotaRefreshError(next, error, this.now())
+        updateStoredAccount(storage, next)
         changed = true
         // Quota probes are advisory; failed probes fail closed at selection time.
       }
@@ -1065,8 +1065,8 @@ export class FallbackAccountManager {
         await this.refreshAccountQuota(next, storage)
         changed = true
       } catch (error) {
-        recordQuotaRefreshError(account, error, this.now())
-        updateStoredAccount(storage, account)
+        recordQuotaRefreshError(next, error, this.now())
+        updateStoredAccount(storage, next)
         changed = true
         errors.push({
           accountId: account.id,

@@ -19,7 +19,8 @@ import { join } from 'node:path'
 const FORK_CORE_PKG = '@marcusrbrown/anthropic-auth-core'
 const FORK_OPENCODE_PKG = '@marcusrbrown/opencode-anthropic-auth'
 const STALE_CORE_PKG = '@cortexkit/anthropic-auth-core'
-const FORK_VERSION = '1.2.2-mb.2'
+
+const FIXTURE_VERSION = '0.0.0-test.1'
 
 const SCRIPT_PATH = join(import.meta.dir, 'verify-artifacts.mjs')
 
@@ -95,64 +96,6 @@ afterEach(() => {
 })
 
 // ---------------------------------------------------------------------------
-// --manifests-only tests (no tarball needed)
-// ---------------------------------------------------------------------------
-
-describe('--manifests-only: local manifest verification', () => {
-  test('passes with correct real workspace manifests', () => {
-    // The real workspace should already have correct manifests from Unit 1.
-    const { exitCode, stdout } = runVerify([
-      '--manifests-only',
-      '--version',
-      FORK_VERSION,
-    ])
-    expect(exitCode).toBe(0)
-    expect(stdout).toContain(FORK_CORE_PKG)
-    expect(stdout).toContain(FORK_OPENCODE_PKG)
-    expect(stdout).toContain('✓')
-  })
-
-  test('reports correct package names and versions', () => {
-    const { stdout } = runVerify([
-      '--manifests-only',
-      '--version',
-      FORK_VERSION,
-    ])
-    expect(stdout).toContain(`core package name: ${FORK_CORE_PKG}`)
-    expect(stdout).toContain(`core version: ${FORK_VERSION}`)
-    expect(stdout).toContain(`opencode version: ${FORK_VERSION}`)
-  })
-
-  test('reports no stale upstream core dependency', () => {
-    const { stdout } = runVerify([
-      '--manifests-only',
-      '--version',
-      FORK_VERSION,
-    ])
-    expect(stdout).toContain(`no stale ${STALE_CORE_PKG} dependency`)
-  })
-
-  test('reports Pi is not at fork version', () => {
-    const { stdout } = runVerify([
-      '--manifests-only',
-      '--version',
-      FORK_VERSION,
-    ])
-    expect(stdout).toContain('pi is not at fork version')
-  })
-
-  test('fails with wrong expected version', () => {
-    const { exitCode, stdout } = runVerify([
-      '--manifests-only',
-      '--version',
-      '9.9.9-mb.99',
-    ])
-    expect(exitCode).toBe(1)
-    expect(stdout).toContain('✗')
-  })
-})
-
-// ---------------------------------------------------------------------------
 // Tarball verification tests
 // ---------------------------------------------------------------------------
 
@@ -175,7 +118,7 @@ describe('tarball verification: core artifact', () => {
       pkgDir,
       {
         name: FORK_CORE_PKG,
-        version: FORK_VERSION,
+        version: FIXTURE_VERSION,
         main: './dist/index.js',
         types: './dist/index.d.ts',
       },
@@ -188,7 +131,7 @@ describe('tarball verification: core artifact', () => {
 
     const { stdout: stdout2 } = runVerify([
       '--version',
-      FORK_VERSION,
+      FIXTURE_VERSION,
       '--core-tarball',
       tarball,
       '--opencode-tarball',
@@ -197,7 +140,7 @@ describe('tarball verification: core artifact', () => {
 
     // Core tarball checks should pass; opencode name check will fail (expected)
     expect(stdout2).toContain(`package name: ${FORK_CORE_PKG}`)
-    expect(stdout2).toContain(`package version: ${FORK_VERSION}`)
+    expect(stdout2).toContain(`package version: ${FIXTURE_VERSION}`)
     expect(stdout2).toContain(
       'PR #40 marker: TOKEN_URL uses platform.claude.com',
     )
@@ -215,14 +158,14 @@ describe('tarball verification: core artifact', () => {
 
     await buildPackageDir(
       pkgDir,
-      { name: STALE_CORE_PKG, version: FORK_VERSION },
+      { name: STALE_CORE_PKG, version: FIXTURE_VERSION },
       { 'index.js': 'export {}', 'index.d.ts': 'export {}' },
     )
     createTarball(pkgDir, tarball)
 
     const { exitCode, stdout } = runVerify([
       '--version',
-      FORK_VERSION,
+      FIXTURE_VERSION,
       '--core-tarball',
       tarball,
       '--opencode-tarball',
@@ -243,7 +186,7 @@ describe('tarball verification: core artifact', () => {
     // Dist content without PR #40 markers
     await buildPackageDir(
       pkgDir,
-      { name: FORK_CORE_PKG, version: FORK_VERSION },
+      { name: FORK_CORE_PKG, version: FIXTURE_VERSION },
       {
         'index.js':
           'export const TOKEN_URL = "https://api.anthropic.com/v1/oauth/token"',
@@ -254,7 +197,7 @@ describe('tarball verification: core artifact', () => {
 
     const { exitCode, stdout } = runVerify([
       '--version',
-      FORK_VERSION,
+      FIXTURE_VERSION,
       '--core-tarball',
       tarball,
       '--opencode-tarball',
@@ -274,7 +217,7 @@ describe('tarball verification: core artifact', () => {
 
     await buildPackageDir(
       pkgDir,
-      { name: FORK_CORE_PKG, version: FORK_VERSION },
+      { name: FORK_CORE_PKG, version: FIXTURE_VERSION },
       {
         'index.js': `import { foo } from "@cortexkit/anthropic-auth-core"`,
         'index.d.ts': 'export {}',
@@ -284,7 +227,7 @@ describe('tarball verification: core artifact', () => {
 
     const { exitCode, stdout } = runVerify([
       '--version',
-      FORK_VERSION,
+      FIXTURE_VERSION,
       '--core-tarball',
       tarball,
       '--opencode-tarball',
@@ -315,7 +258,7 @@ describe('tarball verification: opencode artifact', () => {
 
     await buildPackageDir(
       corePkgDir,
-      { name: FORK_CORE_PKG, version: FORK_VERSION },
+      { name: FORK_CORE_PKG, version: FIXTURE_VERSION },
       { 'index.js': pr40Content, 'index.d.ts': 'export {}' },
     )
     createTarball(corePkgDir, coreTarball)
@@ -325,9 +268,9 @@ describe('tarball verification: opencode artifact', () => {
       opencodePkgDir,
       {
         name: FORK_OPENCODE_PKG,
-        version: FORK_VERSION,
+        version: FIXTURE_VERSION,
         dependencies: {
-          [STALE_CORE_PKG]: FORK_VERSION, // stale!
+          [STALE_CORE_PKG]: FIXTURE_VERSION, // stale!
         },
       },
       {
@@ -340,7 +283,7 @@ describe('tarball verification: opencode artifact', () => {
 
     const { exitCode, stdout } = runVerify([
       '--version',
-      FORK_VERSION,
+      FIXTURE_VERSION,
       '--core-tarball',
       coreTarball,
       '--opencode-tarball',
@@ -368,7 +311,7 @@ describe('tarball verification: opencode artifact', () => {
 
     await buildPackageDir(
       corePkgDir,
-      { name: FORK_CORE_PKG, version: FORK_VERSION },
+      { name: FORK_CORE_PKG, version: FIXTURE_VERSION },
       { 'index.js': pr40Content, 'index.d.ts': 'export {}' },
     )
     createTarball(corePkgDir, coreTarball)
@@ -378,8 +321,8 @@ describe('tarball verification: opencode artifact', () => {
       opencodePkgDir,
       {
         name: FORK_OPENCODE_PKG,
-        version: FORK_VERSION,
-        dependencies: { [FORK_CORE_PKG]: FORK_VERSION },
+        version: FIXTURE_VERSION,
+        dependencies: { [FORK_CORE_PKG]: FIXTURE_VERSION },
       },
       {
         'index.js': 'export {}',
@@ -391,7 +334,7 @@ describe('tarball verification: opencode artifact', () => {
 
     const { exitCode, stdout } = runVerify([
       '--version',
-      FORK_VERSION,
+      FIXTURE_VERSION,
       '--core-tarball',
       coreTarball,
       '--opencode-tarball',

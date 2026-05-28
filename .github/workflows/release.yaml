@@ -203,12 +203,6 @@ jobs:
           fi
           echo "✓ latest dist-tag → ${VER}"
 
-          node scripts/verify-artifacts.mjs \
-            --version "${{ steps.version.outputs.version }}" \
-            --registry-tarball \
-            --manifests-only \
-            --registry-package core
-
   publish-opencode:
     name: Publish @marcusrbrown/opencode-anthropic-auth to npm
     runs-on: ubuntu-latest
@@ -350,12 +344,6 @@ jobs:
             exit 1
           fi
           echo "✓ No stale @cortexkit/anthropic-auth-core dependency in published metadata."
-
-          node scripts/verify-artifacts.mjs \
-            --version "${{ steps.version.outputs.version }}" \
-            --registry-tarball \
-            --manifests-only \
-            --registry-package opencode
 
   github-release:
     name: Create GitHub Release

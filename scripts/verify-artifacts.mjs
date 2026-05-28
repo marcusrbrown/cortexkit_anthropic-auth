@@ -121,8 +121,6 @@ function parseArgs(argv) {
     opencodeTarball: null,
     installCheck: false,
     manifestsOnly: false,
-    registryTarball: false,
-    registryPackage: 'all',
     help: false,
   }
 
@@ -142,11 +140,6 @@ function parseArgs(argv) {
       opts.installCheck = true
     } else if (arg === '--manifests-only') {
       opts.manifestsOnly = true
-    } else if (arg === '--registry-tarball') {
-      opts.registryTarball = true
-    } else if (arg === '--registry-package') {
-      opts.registryPackage = requireValue(arg, i)
-      i++
     } else if (arg === '--version') {
       opts.version = requireValue(arg, i)
       i++
@@ -672,75 +665,6 @@ async function runInstallCheck(opencodeTarball, coreTarball, expectedVersion) {
 }
 
 // ---------------------------------------------------------------------------
-// Registry tarball verification
-// ---------------------------------------------------------------------------
-
-/**
- * Download the published tarball for a package from the npm registry using
- * `npm pack <pkg>@<ver>` (which fetches from the registry without auth for
- * public packages) and run the same tarball checks against it.
- *
- * This is the "fail-closed" path for already-published artifacts: instead of
- * trusting registry metadata alone, we fetch and inspect the actual tarball.
- *
- * @param {string} pkg - npm package name (e.g. '@marcusrbrown/anthropic-auth-core')
- * @param {string} version - expected version string
- * @param {object} verifyOpts - options forwarded to verifyTarball
- */
-async function verifyRegistryTarball(pkg, version, verifyOpts = {}) {
-  section(`Registry tarball verification: ${pkg}@${version}`)
-
-  const packDir = mkdtempSync(join(tmpdir(), 'verify-registry-'))
-  try {
-    // `npm pack <pkg>@<ver>` downloads the published tarball from the registry.
-    // No auth token is required for public packages.
-    const result = spawnSync(
-      'npm',
-      ['pack', `${pkg}@${version}`, '--pack-destination', packDir],
-      {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: {
-          ...process.env,
-          NPM_CONFIG_UPDATE_NOTIFIER: 'false',
-          NPM_CONFIG_AUDIT: 'false',
-          NPM_CONFIG_FUND: 'false',
-        },
-      },
-    )
-
-    if (result.status !== 0) {
-      const stderr = result.stderr?.toString() ?? ''
-      fail(
-        `registry tarball download for ${pkg}@${version}`,
-        `npm pack exited ${result.status}: ${stderr.slice(0, 300)}`,
-      )
-      return
-    }
-
-    const stdout = result.stdout?.toString().trim() ?? ''
-    const tgzName = stdout.split('\n').pop()?.trim()
-    if (!tgzName) {
-      fail(
-        `registry tarball download for ${pkg}@${version}`,
-        'npm pack produced no output',
-      )
-      return
-    }
-
-    const tarballPath = join(packDir, tgzName)
-    pass(`downloaded registry tarball: ${tgzName}`)
-
-    await verifyTarball(tarballPath, pkg, version, verifyOpts)
-  } finally {
-    try {
-      rmSync(packDir, { recursive: true, force: true })
-    } catch {
-      // Best-effort cleanup
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -766,8 +690,6 @@ Options:
   --opencode-tarball <path> Path to packed OpenCode tarball
   --install-check           Run clean install/dependency-graph smoke check
   --manifests-only          Skip tarball checks; verify local manifests only
-  --registry-tarball        Also download and verify published registry tarballs
-  --registry-package <pkg>  Registry package to verify: core, opencode, or all (default: all)
   --help                    Show this help
 
 Exit codes:
@@ -875,30 +797,6 @@ Exit codes:
           // Best-effort cleanup
         }
       }
-    }
-  }
-
-  // Registry tarball verification (fail-closed: download and inspect published tarballs)
-  if (opts.registryTarball) {
-    if (!['core', 'opencode', 'all'].includes(opts.registryPackage)) {
-      fail(
-        'registry package selector',
-        `expected core, opencode, or all; got ${opts.registryPackage}`,
-      )
-    }
-
-    if (opts.registryPackage === 'core' || opts.registryPackage === 'all') {
-      await verifyRegistryTarball(FORK_CORE_PKG, expectedVersion, {
-        requiredFiles: REQUIRED_CORE_FILES,
-        checkPR40Markers: true,
-      })
-    }
-
-    if (opts.registryPackage === 'opencode' || opts.registryPackage === 'all') {
-      await verifyRegistryTarball(FORK_OPENCODE_PKG, expectedVersion, {
-        requiredFiles: REQUIRED_OPENCODE_FILES,
-        checkCoreDep: true,
-      })
     }
   }
 

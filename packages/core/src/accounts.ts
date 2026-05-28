@@ -135,6 +135,9 @@ const DEFAULT_MINIMUM_REMAINING: Record<QuotaWindowName, number> = {
 const DEFAULT_FAIL_CLOSED_ON_UNKNOWN_QUOTA = true
 const BACKGROUND_TICK_MS = 60_000
 const BACKGROUND_TICK_JITTER_MS = 60_000
+const FALLBACK_REFRESH_LOCK_TTL_MS = 2 * 60_000
+const FALLBACK_REFRESH_JOIN_WAIT_MS = 10_000
+const FALLBACK_REFRESH_JOIN_POLL_MS = 100
 
 function getConfigDir() {
   if (process.env.OPENCODE_CONFIG_DIR?.trim()) {
@@ -692,6 +695,52 @@ function quotaIsStale(
   })
 }
 
+function cachedQuotaWindowStillRelevant(
+  window: AccountQuotaWindow | undefined,
+  now: number,
+) {
+  if (!window) return false
+  if (!window.resetsAt) return true
+  const resetTime = Date.parse(window.resetsAt)
+  return !Number.isFinite(resetTime) || resetTime > now
+}
+
+function cachedQuotaSnapshotStillRelevant(
+  quota: OAuthQuotaSnapshot | undefined,
+  now: number,
+) {
+  return (['five_hour', 'seven_day'] as const).every((key) =>
+    cachedQuotaWindowStillRelevant(quota?.[key], now),
+  )
+}
+
+function isTransientQuotaError(error: unknown) {
+  const message = formatErrorMessage(error)
+  if (/Claude quota check failed: (429|5\d\d)\b/.test(message)) return true
+  if (!(error instanceof Error)) return false
+  const code = (error as Error & { code?: unknown }).code
+  return (
+    message.includes('fetch failed') ||
+    code === 'ECONNRESET' ||
+    code === 'ECONNREFUSED' ||
+    code === 'ETIMEDOUT' ||
+    code === 'UND_ERR_CONNECT_TIMEOUT'
+  )
+}
+
+function canUseCachedQuotaAfterRefreshError(
+  account: OAuthAccount,
+  storage: AccountStorage | null,
+  error: unknown,
+  now: number,
+) {
+  return (
+    isTransientQuotaError(error) &&
+    quotaSnapshotPassesPolicy(account.quota, storage) &&
+    cachedQuotaSnapshotStillRelevant(account.quota, now)
+  )
+}
+
 function clampPercent(value: number) {
   if (!Number.isFinite(value)) return 0
   if (value < 0) return 0
@@ -781,6 +830,13 @@ function recordQuotaRefreshError(
   }
 }
 
+function fallbackRefreshLockName(accountId: string) {
+  return `fallback-oauth-refresh-${createHash('sha256')
+    .update(accountId)
+    .digest('hex')
+    .slice(0, 16)}`
+}
+
 export class FallbackAccountManager {
   private readonly now: () => number
   private readonly fetchImpl: typeof fetch
@@ -833,8 +889,8 @@ export class FallbackAccountManager {
 
     for (const account of storage.accounts) {
       if (account.enabled === false) continue
+      let next = account
       try {
-        let next = account
         if (tokenNeedsRefresh(next, storage, this.now())) {
           const refreshError = next.lastRefreshError
           if (
@@ -853,8 +909,26 @@ export class FallbackAccountManager {
           changed = true
         }
         if (this.accountPassesQuotaPolicy(next, storage)) usable.push(next)
-      } catch {
-        if (!failClosedOnUnknownQuota(storage)) usable.push(account)
+      } catch (error) {
+        if (
+          canUseCachedQuotaAfterRefreshError(
+            account,
+            storage,
+            error,
+            this.now(),
+          )
+        ) {
+          log(
+            '[refresh] fallback quota using cached quota after refresh error',
+            {
+              accountId: account.id,
+              error: formatErrorMessage(error),
+            },
+          )
+          usable.push(next)
+        } else if (!failClosedOnUnknownQuota(storage)) {
+          usable.push(next)
+        }
       }
     }
 
@@ -949,8 +1023,8 @@ export class FallbackAccountManager {
         await this.refreshAccountQuota(next, storage)
         changed = true
       } catch (error) {
-        recordQuotaRefreshError(account, error, this.now())
-        updateStoredAccount(storage, account)
+        recordQuotaRefreshError(next, error, this.now())
+        updateStoredAccount(storage, next)
         changed = true
         // Quota probes are advisory; failed probes fail closed at selection time.
       }
@@ -980,11 +1054,19 @@ export class FallbackAccountManager {
           next = await this.refreshAccount(next, storage)
           changed = true
         }
+        if (!quotaIsStale(next, storage, this.now())) {
+          if (next.lastQuotaRefreshError) {
+            next.lastQuotaRefreshError = undefined
+            updateStoredAccount(storage, next)
+            changed = true
+          }
+          continue
+        }
         await this.refreshAccountQuota(next, storage)
         changed = true
       } catch (error) {
-        recordQuotaRefreshError(account, error, this.now())
-        updateStoredAccount(storage, account)
+        recordQuotaRefreshError(next, error, this.now())
+        updateStoredAccount(storage, next)
         changed = true
         errors.push({
           accountId: account.id,
@@ -1019,13 +1101,61 @@ export class FallbackAccountManager {
     return refreshed
   }
 
+  private async waitForConcurrentFallbackRefresh(
+    account: OAuthAccount,
+    storage: AccountStorage,
+    previous: OAuthAccount,
+    options: { force?: boolean },
+  ) {
+    const deadline = Date.now() + FALLBACK_REFRESH_JOIN_WAIT_MS
+    while (Date.now() < deadline) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, FALLBACK_REFRESH_JOIN_POLL_MS),
+      )
+      const latestStorage = await this.load()
+      const latestAccount = latestStorage?.accounts.find(
+        (candidate) => candidate.id === account.id,
+      )
+      if (!latestAccount) continue
+
+      const changed =
+        latestAccount.access !== previous.access ||
+        latestAccount.refresh !== previous.refresh ||
+        (latestAccount.expires ?? 0) > (previous.expires ?? 0) + 60_000
+      if (
+        changed &&
+        (options.force ||
+          !tokenNeedsRefresh(latestAccount, latestStorage, this.now()))
+      ) {
+        updateStoredAccount(storage, latestAccount)
+        log('[refresh] fallback oauth joined concurrent refresh', {
+          accountId: latestAccount.id,
+          expiresInMs: latestAccount.expires
+            ? latestAccount.expires - this.now()
+            : undefined,
+        })
+        return latestAccount
+      }
+
+      const refreshError = latestAccount.lastRefreshError
+      if (
+        refreshError &&
+        refreshBackoffActive(refreshError, latestAccount.refresh, this.now())
+      ) {
+        updateStoredAccount(storage, latestAccount)
+        throw new Error(formatRefreshBackoffMessage(refreshError, this.now()))
+      }
+    }
+    return null
+  }
+
   private async refreshAccountNow(
     account: OAuthAccount,
     storage: AccountStorage,
     options: { force?: boolean },
   ) {
-    const latestStorage = await this.load()
-    const latestAccount = latestStorage?.accounts.find(
+    let latestStorage = await this.load()
+    let latestAccount = latestStorage?.accounts.find(
       (candidate) => candidate.id === account.id,
     )
     if (
@@ -1037,34 +1167,73 @@ export class FallbackAccountManager {
       return latestAccount
     }
 
-    const sourceAccount = latestAccount ?? account
-    const refreshToken = sourceAccount.refresh
-    log('[refresh] fallback oauth refresh request start', {
-      accountId: sourceAccount.id,
-      force: options.force === true,
-      expiresInMs: sourceAccount.expires
-        ? sourceAccount.expires - this.now()
-        : undefined,
-    })
-    const refreshed = await refreshClaudeOAuthToken({
-      refreshToken,
-      fetchImpl: this.fetchImpl,
+    let sourceAccount = latestAccount ?? account
+    const fileLock = await acquireRefreshFileLock({
+      name: fallbackRefreshLockName(sourceAccount.id),
+      ttlMs: FALLBACK_REFRESH_LOCK_TTL_MS,
+      path: this.configPath,
       now: this.now,
     })
-    sourceAccount.access = refreshed.access
-    sourceAccount.refresh = refreshed.refresh
-    sourceAccount.expires = refreshed.expires
-    sourceAccount.lastRefreshedAt =
-      refreshed.expires - refreshed.expiresIn * 1000
-    sourceAccount.lastRefreshError = undefined
-    updateStoredAccount(storage, sourceAccount)
-    log('[refresh] fallback oauth refresh succeeded', {
-      accountId: sourceAccount.id,
-      expiresInMs: sourceAccount.expires
-        ? sourceAccount.expires - this.now()
-        : undefined,
-    })
-    return sourceAccount
+    if (!fileLock) {
+      log('[refresh] fallback oauth refresh skipped file lock', {
+        accountId: sourceAccount.id,
+      })
+      const concurrent = await this.waitForConcurrentFallbackRefresh(
+        account,
+        storage,
+        sourceAccount,
+        options,
+      )
+      if (concurrent) return concurrent
+      throw new Error('Fallback OAuth refresh is already in progress')
+    }
+
+    try {
+      latestStorage = await this.load()
+      latestAccount = latestStorage?.accounts.find(
+        (candidate) => candidate.id === account.id,
+      )
+      if (
+        latestAccount &&
+        !options.force &&
+        !tokenNeedsRefresh(latestAccount, latestStorage, this.now())
+      ) {
+        updateStoredAccount(storage, latestAccount)
+        return latestAccount
+      }
+
+      sourceAccount = latestAccount ?? sourceAccount
+      const refreshToken = sourceAccount.refresh
+      log('[refresh] fallback oauth refresh request start', {
+        accountId: sourceAccount.id,
+        force: options.force === true,
+        expiresInMs: sourceAccount.expires
+          ? sourceAccount.expires - this.now()
+          : undefined,
+      })
+      const refreshed = await refreshClaudeOAuthToken({
+        refreshToken,
+        fetchImpl: this.fetchImpl,
+        now: this.now,
+      })
+      sourceAccount.access = refreshed.access
+      sourceAccount.refresh = refreshed.refresh
+      sourceAccount.expires = refreshed.expires
+      sourceAccount.lastRefreshedAt =
+        refreshed.expires - refreshed.expiresIn * 1000
+      sourceAccount.lastRefreshError = undefined
+      updateStoredAccount(storage, sourceAccount)
+      await this.save(storage)
+      log('[refresh] fallback oauth refresh succeeded', {
+        accountId: sourceAccount.id,
+        expiresInMs: sourceAccount.expires
+          ? sourceAccount.expires - this.now()
+          : undefined,
+      })
+      return sourceAccount
+    } finally {
+      await fileLock.release()
+    }
   }
 
   async refreshAccountQuota(account: OAuthAccount, storage: AccountStorage) {

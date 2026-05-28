@@ -8,3 +8,5 @@ The `captures/` directory is for local system-prompt captures from Claude Code a
 - **Extract prompt**: `bun run extract <name>.flow -o captures/<tool>-v<version>.txt`
 
 See [captures/AGENTS.md](captures/AGENTS.md) for prerequisites, full workflow, and PII redaction rules.
+
+`docs/solutions/` stores documented solutions to past problems (bugs, workflow issues, best practices), organized by category with YAML frontmatter (`module`, `tags`, `problem_type`). Relevant when implementing or debugging in documented areas.

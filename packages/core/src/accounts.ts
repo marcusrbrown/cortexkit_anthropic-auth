@@ -575,7 +575,7 @@ export function buildRefreshOperationError(input: {
   let delay: number
   if (
     input.error instanceof ClaudeOAuthRefreshError &&
-    input.error.retryAfter
+    input.error.retryAfter !== undefined
   ) {
     delay = input.error.retryAfter * 1000
   } else if (isTransientRefreshError(input.error)) {

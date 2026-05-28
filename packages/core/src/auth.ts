@@ -17,7 +17,7 @@ function parseRetryAfterHeader(
 ): number | undefined {
   if (!value) return undefined
   const seconds = Number(value)
-  if (Number.isFinite(seconds) && seconds > 0) return Math.ceil(seconds)
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds)
   const date = Date.parse(value)
   if (Number.isFinite(date)) {
     const delta = Math.ceil((date - Date.now()) / 1000)

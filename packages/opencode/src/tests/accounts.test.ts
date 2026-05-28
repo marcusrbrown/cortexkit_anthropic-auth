@@ -721,6 +721,16 @@ describe('buildRefreshOperationError', () => {
     expect(result.nextRetryAt).toBe(1000000 + 120_000)
   })
 
+  test('honors Retry-After: 0 by setting nextRetryAt to now', () => {
+    const error = new ClaudeOAuthRefreshError(429, 'rate limited', '0')
+    const result = buildRefreshOperationError({
+      error,
+      now: 1000000,
+      refreshToken: 'test-token',
+    })
+    expect(result.nextRetryAt).toBe(1000000)
+  })
+
   test('falls back to exponential backoff when no Retry-After', () => {
     const error = new ClaudeOAuthRefreshError(429, 'rate limited')
     const result = buildRefreshOperationError({

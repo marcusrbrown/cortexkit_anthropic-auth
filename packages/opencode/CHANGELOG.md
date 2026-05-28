@@ -16,6 +16,28 @@ This fork publishes the OpenCode package as `@marcusrbrown/opencode-anthropic-au
 
 - Publish the OpenCode package under `@marcusrbrown/opencode-anthropic-auth` with fork suffix versioning for pinned fork installs.
 
+## 1.2.5
+
+### Patch Changes
+
+- Reuse cached fallback-account quota snapshots when transient quota probes are rate limited, so an account with known remaining quota can still be tried instead of falling back to an exhausted main account.
+- Reuse fresh fallback-account quota snapshots during explicit quota checks and clear stale quota errors so transient quota-probe `429`s do not hide otherwise usable fallback account state.
+
+## 1.2.4
+
+### Patch Changes
+
+- Serialize fallback-account OAuth refreshes across OpenCode processes so concurrent refresh attempts cannot reuse and invalidate a rotating refresh token.
+
+## 1.2.3
+
+### Patch Changes
+
+- Align Claude OAuth token refresh with the live-tested PR #40 request shape: `https://platform.claude.com/v1/oauth/token`, JSON payloads, and an `axios/1.13.6` User-Agent.
+- Honor OAuth `Retry-After` responses and skip request-path refresh attempts while main-account backoff is active, reducing repeated refresh failures during Anthropic rate limits.
+
+Thanks to [@iceteaSA](https://github.com/iceteaSA) for the OAuth refresh fixes in this release.
+
 ## 1.2.1
 
 ### Patch Changes

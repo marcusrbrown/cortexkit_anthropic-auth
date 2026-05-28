@@ -467,6 +467,73 @@ describe('FallbackAccountManager', () => {
     expect(stale.accounts[0]?.refresh).toBe('fresh-refresh')
   })
 
+  test('serializes concurrent fallback refreshes across manager instances', async () => {
+    const storage = baseStorage()
+    storage.accounts.push({
+      id: 'fallback-1',
+      type: 'oauth',
+      access: 'old-access',
+      refresh: 'old-refresh',
+      expires: 100,
+    })
+    await saveAccounts(storage)
+
+    let releaseRefresh!: () => void
+    const refreshStarted = Promise.withResolvers<void>()
+    const refreshCanFinish = new Promise<void>((resolve) => {
+      releaseRefresh = resolve
+    })
+    let calls = 0
+    const fetchImpl = mock(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        calls += 1
+        const call = calls
+        const body = JSON.parse(String(init?.body))
+        expect(body.refresh_token).toBe('old-refresh')
+        refreshStarted.resolve()
+        await refreshCanFinish
+        if (call > 1) {
+          return new Response(
+            JSON.stringify({
+              error: 'invalid_grant',
+              error_description: 'Refresh token not found or invalid',
+            }),
+            { status: 400 },
+          )
+        }
+        return new Response(
+          JSON.stringify({
+            access_token: 'new-access',
+            refresh_token: 'new-refresh',
+            expires_in: 28_800,
+          }),
+          { status: 200 },
+        )
+      },
+    ) as unknown as typeof fetch
+
+    const managerA = new FallbackAccountManager({
+      fetchImpl,
+      now: () => 2_000,
+    })
+    const managerB = new FallbackAccountManager({
+      fetchImpl,
+      now: () => 2_000,
+    })
+
+    const first = managerA.refreshDueAccounts()
+    await refreshStarted.promise
+    const second = managerB.refreshDueAccounts()
+    releaseRefresh()
+    await Promise.all([first, second])
+
+    const saved = await loadAccounts()
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(saved?.accounts[0]?.access).toBe('new-access')
+    expect(saved?.accounts[0]?.refresh).toBe('new-refresh')
+    expect(saved?.accounts[0]?.lastRefreshError).toBeUndefined()
+  })
+
   test('starts an immediate background refresh pass for unused expired fallbacks', async () => {
     const storage = baseStorage()
     storage.quota = { ...storage.quota, enabled: false }
@@ -673,6 +740,137 @@ describe('FallbackAccountManager', () => {
 
     const saved = await loadAccounts()
     expect(saved?.accounts[0]?.refresh).toBe('fresh-refresh')
+  })
+
+  test('uses cached passing quota when a stale quota refresh is rate limited', async () => {
+    const storage = baseStorage()
+    storage.accounts.push({
+      id: 'stale-good-quota',
+      type: 'oauth',
+      access: 'access-token',
+      refresh: 'refresh-token',
+      expires: 20_000_000,
+      quota: {
+        five_hour: {
+          usedPercent: 30,
+          remainingPercent: 70,
+          checkedAt: 1_000,
+          resetsAt: '2099-01-01T00:00:00Z',
+        },
+        seven_day: {
+          usedPercent: 62,
+          remainingPercent: 38,
+          checkedAt: 1_000,
+          resetsAt: '2099-01-01T00:00:00Z',
+        },
+      },
+    })
+    await saveAccounts(storage)
+
+    const fetchImpl = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: { type: 'rate_limit_error', message: 'Rate limited' },
+          }),
+          { status: 429 },
+        ),
+      ),
+    ) as unknown as typeof fetch
+
+    const manager = new FallbackAccountManager({
+      fetchImpl,
+      now: () => 10 * 60_000,
+    })
+
+    const accounts = await manager.getUsableFallbackAccounts()
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(accounts.map((account) => account.id)).toEqual(['stale-good-quota'])
+  })
+
+  test('does not use cached failing quota when a stale quota refresh is rate limited', async () => {
+    const storage = baseStorage()
+    storage.accounts.push({
+      id: 'stale-low-quota',
+      type: 'oauth',
+      access: 'access-token',
+      refresh: 'refresh-token',
+      expires: 20_000_000,
+      quota: {
+        five_hour: {
+          usedPercent: 95,
+          remainingPercent: 5,
+          checkedAt: 1_000,
+          resetsAt: '2099-01-01T00:00:00Z',
+        },
+        seven_day: {
+          usedPercent: 62,
+          remainingPercent: 38,
+          checkedAt: 1_000,
+          resetsAt: '2099-01-01T00:00:00Z',
+        },
+      },
+    })
+    await saveAccounts(storage)
+
+    const fetchImpl = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: { type: 'rate_limit_error', message: 'Rate limited' },
+          }),
+          { status: 429 },
+        ),
+      ),
+    ) as unknown as typeof fetch
+
+    const manager = new FallbackAccountManager({
+      fetchImpl,
+      now: () => 10 * 60_000,
+    })
+
+    const accounts = await manager.getUsableFallbackAccounts()
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(accounts).toEqual([])
+  })
+
+  test('skips fresh quota refresh and clears stale quota errors', async () => {
+    const storage = baseStorage()
+    storage.accounts.push({
+      id: 'fresh-quota-with-old-error',
+      type: 'oauth',
+      access: 'access-token',
+      refresh: 'refresh-token',
+      expires: 20_000_000,
+      quota: {
+        five_hour: { usedPercent: 10, remainingPercent: 90, checkedAt: 1_900 },
+        seven_day: { usedPercent: 20, remainingPercent: 80, checkedAt: 1_900 },
+      },
+      lastQuotaRefreshError: {
+        message: 'Claude quota check failed: 429 — rate limited',
+        checkedAt: 1_800,
+      },
+    })
+    await saveAccounts(storage)
+
+    const fetchImpl = mock(() => {
+      throw new Error('fresh quota should not be refetched')
+    }) as unknown as typeof fetch
+
+    const manager = new FallbackAccountManager({
+      fetchImpl,
+      now: () => 2_000,
+    })
+
+    const result = await manager.refreshQuotaForAllAccounts()
+
+    expect(result.errors).toEqual([])
+    expect(fetchImpl).not.toHaveBeenCalled()
+    const saved = await loadAccounts()
+    expect(saved?.accounts[0]?.quota?.five_hour?.remainingPercent).toBe(90)
+    expect(saved?.accounts[0]?.lastQuotaRefreshError).toBeUndefined()
   })
 
   test('returns refresh errors from explicit quota refresh', async () => {

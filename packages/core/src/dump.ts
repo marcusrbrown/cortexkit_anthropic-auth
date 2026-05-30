@@ -175,6 +175,17 @@ function hashJson(value: unknown) {
   return hashText(JSON.stringify(value))
 }
 
+function stableSystemBlocks(system: unknown[]) {
+  const first = system[0]
+  return first &&
+    typeof first === 'object' &&
+    'text' in first &&
+    typeof first.text === 'string' &&
+    first.text.startsWith('x-anthropic-billing-header:')
+    ? system.slice(1)
+    : system
+}
+
 function bodyStructureSummary(bodyText: string) {
   const parsed = parseBody(bodyText)
   if (!parsed) return { parseable: false as const }
@@ -190,6 +201,9 @@ function bodyStructureSummary(bodyText: string) {
     systemCount: system.length,
     messagesCount: messages.length,
     systemHash: hashJson(system),
+    // stableSystemHash excludes only the volatile x-anthropic-billing-header
+    // block whose cch=<5hex> token changes on every request.
+    stableSystemHash: hashJson(stableSystemBlocks(system)),
     message0Hash: message0 === undefined ? null : hashJson(message0),
     message0Bytes: message0 === undefined ? 0 : JSON.stringify(message0).length,
     messagesAfter0Hash: hashJson(messagesAfter0),

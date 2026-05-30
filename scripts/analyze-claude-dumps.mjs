@@ -53,9 +53,19 @@ function bodyHash(meta, key) {
 }
 
 function compareMeta(previous, current) {
+  // stableSystemHash excludes system[0] (the volatile billing header with cch=<5hex>).
+  // If available, use it for bust classification so billing-header-only changes don't
+  // trigger false positives. Fall back to systemHash for legacy dumps that lack it.
+  const hasStable =
+    bodyHash(previous, 'stableSystemHash') !== null &&
+    bodyHash(current, 'stableSystemHash') !== null
   const changes = {
     systemHash:
       bodyHash(previous, 'systemHash') !== bodyHash(current, 'systemHash'),
+    stableSystemHash: hasStable
+      ? bodyHash(previous, 'stableSystemHash') !==
+        bodyHash(current, 'stableSystemHash')
+      : undefined,
     message0Hash:
       bodyHash(previous, 'message0Hash') !== bodyHash(current, 'message0Hash'),
     messagesAfter0Hash:
@@ -64,8 +74,13 @@ function compareMeta(previous, current) {
     cch: bodyHash(previous, 'cch') !== bodyHash(current, 'cch'),
     model: bodyHash(previous, 'model') !== bodyHash(current, 'model'),
   }
+  // Use stableSystemHash when available; fall back to systemHash for legacy dumps.
+  // cch changes alone are expected (billing header volatility) — not a bust signal.
+  const stableSystemChanged = hasStable
+    ? changes.stableSystemHash
+    : changes.systemHash
   const nonTailChanged =
-    changes.systemHash || changes.message0Hash || changes.cch || changes.model
+    stableSystemChanged || changes.message0Hash || changes.model
   return {
     previous: previous.id,
     current: current.id,

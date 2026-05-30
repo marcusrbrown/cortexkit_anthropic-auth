@@ -219,6 +219,54 @@ function redactForDump(value: unknown): unknown {
   return redacted
 }
 
+export async function dumpDirectRequest(input: {
+  affinity?: string
+  mode: 'direct' | 'fallback'
+  status?: number
+  bodyText: string
+}) {
+  if (!dumpEnabled) return
+  nextDumpId += 1
+  const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-${String(nextDumpId).padStart(5, '0')}-direct-${input.mode}`
+  const prefix = join(DUMP_DIR, id)
+
+  try {
+    await mkdir(DUMP_DIR, { recursive: true })
+    const metadata = {
+      id,
+      createdAt: new Date().toISOString(),
+      session: input.affinity ? shortAffinity(input.affinity) : undefined,
+      transport: 'direct',
+      mode: input.mode,
+      status: input.status,
+      bodyBytes: input.bodyText.length,
+      bodyHash: hashText(input.bodyText),
+      body: bodyStructureSummary(input.bodyText),
+      files: {
+        body: `${prefix}.body.json`,
+        metadata: `${prefix}.meta.json`,
+      },
+    }
+
+    await Promise.all([
+      writeFile(`${prefix}.body.json`, input.bodyText, 'utf8'),
+      writeFile(
+        `${prefix}.meta.json`,
+        `${JSON.stringify(metadata, null, 2)}\n`,
+        'utf8',
+      ),
+    ])
+
+    relayLog(
+      `dumped direct request id=${id} body=${prefix}.body.json meta=${prefix}.meta.json`,
+    )
+  } catch (error) {
+    relayLog(
+      `dump failed: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
 export async function dumpRelayRequest(input: {
   affinity: string
   transport: 'http' | 'websocket'

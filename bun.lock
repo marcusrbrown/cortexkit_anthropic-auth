@@ -20,7 +20,7 @@
     },
     "packages/core": {
       "name": "@marcusrbrown/anthropic-auth-core",
-      "version": "1.2.5-mb.1",
+      "version": "1.2.5-mb.2",
       "dependencies": {
         "xxhash-wasm": "^1.1.0",
       },
@@ -33,7 +33,7 @@
     },
     "packages/opencode": {
       "name": "@marcusrbrown/opencode-anthropic-auth",
-      "version": "1.2.5-mb.1",
+      "version": "1.2.5-mb.2",
       "bin": {
         "opencode-anthropic-auth": "dist/cli.js",
       },
@@ -631,6 +631,8 @@
     "@aws-crypto/sha256-browser/@smithy/util-utf8": ["@smithy/util-utf8@2.3.0", "", { "dependencies": { "@smithy/util-buffer-from": "^2.2.0", "tslib": "^2.6.2" } }, "sha512-R8Rdn8Hy72KKcebgLiv8jQcQkXoLMOGGv5uI1/k0l+snqkOzQ1R0ChUBCxWMlBsFMekWjq0wRudIweFs7sKT5A=="],
 
     "@aws-crypto/util/@smithy/util-utf8": ["@smithy/util-utf8@2.3.0", "", { "dependencies": { "@smithy/util-buffer-from": "^2.2.0", "tslib": "^2.6.2" } }, "sha512-R8Rdn8Hy72KKcebgLiv8jQcQkXoLMOGGv5uI1/k0l+snqkOzQ1R0ChUBCxWMlBsFMekWjq0wRudIweFs7sKT5A=="],
+
+    "@cortexkit/pi-anthropic-auth/@marcusrbrown/anthropic-auth-core": ["@marcusrbrown/anthropic-auth-core@1.2.5-mb.1", "", { "dependencies": { "xxhash-wasm": "^1.1.0" } }, "sha512-C0oZFOJPDqwUosMVJnPPdzxiBGJodZl3HyyJCdLBHHN3pvi2gpkifYnAtOvZrPDFTWMrbkBPkgCgUY6T2ln9zg=="],
 
     "@google/genai/ws": ["ws@8.20.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-sAt8BhgNbzCtgGbt2OxmpuryO63ZoDk/sqaB/znQm94T4fCEsy/yV+7CdC1kJhOU9lboAEU7R3kquuycDoibVA=="],
 

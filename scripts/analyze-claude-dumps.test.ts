@@ -116,4 +116,34 @@ describe('analyze-claude-dumps', () => {
       },
     })
   })
+
+  test('does not pair anonymous dumps without a session together', () => {
+    writeMeta('001.meta.json', {
+      id: '001',
+      createdAt: '2026-05-29T12:00:00.000Z',
+      transport: 'direct',
+      body: {
+        systemHash: 'system-a',
+        message0Hash: 'message0-a',
+        messagesAfter0Hash: 'tail-a',
+      },
+    })
+    writeMeta('002.meta.json', {
+      id: '002',
+      createdAt: '2026-05-29T12:01:00.000Z',
+      transport: 'direct',
+      body: {
+        systemHash: 'system-b',
+        message0Hash: 'message0-b',
+        messagesAfter0Hash: 'tail-b',
+      },
+    })
+
+    const result = runAnalyze(['--json'])
+
+    expect(result.exitCode).toBe(0)
+    const report = JSON.parse(result.stdout)
+    // Anonymous dumps must NOT be paired together — no bust candidates between them
+    expect(report.pairs).toHaveLength(0)
+  })
 })

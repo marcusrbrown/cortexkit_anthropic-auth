@@ -1476,4 +1476,41 @@ describe('relay client', () => {
       await rm(getDumpDirectory(), { recursive: true, force: true })
     }
   })
+
+  test('dumps direct metadata when relay config exists but affinity header is missing', async () => {
+    await rm(getDumpDirectory(), { recursive: true, force: true })
+    setDumpEnabled(true)
+    const body = JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      stream: true,
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+    })
+
+    try {
+      const response = await sendViaRelay({
+        config,
+        input: 'https://api.anthropic.com/v1/messages?beta=true',
+        init: { method: 'POST' },
+        headers: new Headers({ authorization: 'Bearer access-token' }), // no affinity header
+        body,
+        fallback: async () => new Response('no-affinity-ok', { status: 200 }),
+      })
+      expect(await response.text()).toBe('no-affinity-ok')
+
+      const files = await readdir(getDumpDirectory())
+      const metaPath = files.find((file) => file.endsWith('.meta.json'))
+      const bodyPath = files.find((file) => file.endsWith('.body.json'))
+
+      expect(metaPath).toBeString()
+      expect(bodyPath).toBeString()
+
+      const meta = JSON.parse(
+        await readFile(`${getDumpDirectory()}/${metaPath}`, 'utf8'),
+      )
+      expect(meta.transport).toBe('direct')
+    } finally {
+      resetDumpState()
+      await rm(getDumpDirectory(), { recursive: true, force: true })
+    }
+  })
 })

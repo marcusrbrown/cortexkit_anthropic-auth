@@ -105,7 +105,8 @@ function buildPairs(metas) {
   const pairs = []
   const bySession = new Map()
   for (const meta of metas) {
-    const session = meta.session ?? '__unknown__'
+    const session = meta.session
+    if (!session) continue // skip anonymous dumps — pairing them fabricates misleading candidates
     const previous = bySession.get(session)
     if (previous) pairs.push(compareMeta(previous, meta))
     bySession.set(session, meta)

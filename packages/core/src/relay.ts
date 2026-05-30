@@ -955,7 +955,14 @@ export async function sendViaRelay(options: {
     headers.get('x-opencode-session')
   if (!affinity) {
     relayLog('skipping relay: missing x-session-affinity header')
-    return fallback()
+    const response = await fallback()
+    await dumpDirectRequest({
+      affinity: undefined,
+      mode: 'direct',
+      status: response.status,
+      bodyText: body as string,
+    })
+    return response
   }
 
   const bodyText = body as string

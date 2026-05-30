@@ -1334,4 +1334,146 @@ describe('relay client', () => {
       await rm(getDumpDirectory(), { recursive: true, force: true })
     }
   })
+
+  test('dumps body and metadata when dump enabled and no relay config (direct send)', async () => {
+    await rm(getDumpDirectory(), { recursive: true, force: true })
+    setDumpEnabled(true)
+    const body = JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      stream: true,
+      system: [{ type: 'text', text: 'system cch=abcde;' }],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }],
+    })
+
+    try {
+      const response = await sendViaRelay({
+        config: null,
+        input: 'https://api.anthropic.com/v1/messages?beta=true',
+        init: { method: 'POST' },
+        headers: headers('session-direct-dump'),
+        body,
+        fallback: async () => new Response('direct-ok', { status: 200 }),
+      })
+      expect(await response.text()).toBe('direct-ok')
+
+      const files = await readdir(getDumpDirectory())
+      const metaPath = files.find((file) => file.endsWith('.meta.json'))
+      const bodyPath = files.find((file) => file.endsWith('.body.json'))
+
+      expect(metaPath).toBeString()
+      expect(bodyPath).toBeString()
+
+      const meta = JSON.parse(
+        await readFile(`${getDumpDirectory()}/${metaPath}`, 'utf8'),
+      )
+      expect(meta.transport).toBe('direct')
+      expect(meta.body).toMatchObject({
+        parseable: true,
+        messagesCount: 1,
+        systemCount: 1,
+        cch: 'abcde',
+      })
+      expect(
+        await readFile(`${getDumpDirectory()}/${bodyPath}`, 'utf8'),
+      ).toContain('hello')
+    } finally {
+      resetDumpState()
+      await rm(getDumpDirectory(), { recursive: true, force: true })
+    }
+  })
+
+  test('does not dump when dump disabled and no relay config', async () => {
+    await rm(getDumpDirectory(), { recursive: true, force: true })
+    // dumpEnabled is false by default (resetDumpState sets it false)
+    const body = JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] })
+
+    const response = await sendViaRelay({
+      config: null,
+      input: 'https://api.anthropic.com/v1/messages?beta=true',
+      init: { method: 'POST' },
+      headers: headers('session-nodump'),
+      body,
+      fallback: async () => new Response('direct-nodump', { status: 200 }),
+    })
+    expect(await response.text()).toBe('direct-nodump')
+
+    let files: string[] = []
+    try {
+      files = await readdir(getDumpDirectory())
+    } catch {
+      // directory doesn't exist — that's fine
+    }
+    expect(files).toHaveLength(0)
+  })
+
+  test('does not dump non-message requests when relay config is absent', async () => {
+    await rm(getDumpDirectory(), { recursive: true, force: true })
+    setDumpEnabled(true)
+
+    try {
+      const response = await sendViaRelay({
+        config: null,
+        input: 'https://api.anthropic.com/v1/models',
+        init: { method: 'POST' },
+        headers: headers('session-non-message-direct-dump'),
+        body: JSON.stringify({ ping: true }),
+        fallback: async () => new Response('non-message-ok', { status: 200 }),
+      })
+      expect(await response.text()).toBe('non-message-ok')
+
+      let files: string[] = []
+      try {
+        files = await readdir(getDumpDirectory())
+      } catch {
+        // directory doesn't exist — that's fine
+      }
+      expect(files).toHaveLength(0)
+    } finally {
+      resetDumpState()
+      await rm(getDumpDirectory(), { recursive: true, force: true })
+    }
+  })
+
+  test('dumps body and metadata when relay fails and falls back to direct', async () => {
+    const originalFetch = globalThis.fetch
+    await rm(getDumpDirectory(), { recursive: true, force: true })
+    setDumpEnabled(true)
+    globalThis.fetch = mock(async () => {
+      throw new Error('relay offline')
+    }) as unknown as typeof fetch
+    const body = JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      stream: true,
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'retry' }] }],
+    })
+
+    try {
+      const response = await sendViaRelay({
+        config,
+        input: 'https://api.anthropic.com/v1/messages?beta=true',
+        init: { method: 'POST' },
+        headers: headers('session-fallback-dump'),
+        body,
+        fallback: async () => new Response('fallback-ok', { status: 200 }),
+      })
+      expect(await response.text()).toBe('fallback-ok')
+
+      const files = await readdir(getDumpDirectory())
+      const metaPath = files.find((file) => file.endsWith('.meta.json'))
+      const bodyPath = files.find((file) => file.endsWith('.body.json'))
+
+      expect(metaPath).toBeString()
+      expect(bodyPath).toBeString()
+
+      const meta = JSON.parse(
+        await readFile(`${getDumpDirectory()}/${metaPath}`, 'utf8'),
+      )
+      expect(meta.transport).toBe('direct')
+      expect(meta.mode).toBe('fallback')
+    } finally {
+      resetDumpState()
+      globalThis.fetch = originalFetch
+      await rm(getDumpDirectory(), { recursive: true, force: true })
+    }
+  })
 })

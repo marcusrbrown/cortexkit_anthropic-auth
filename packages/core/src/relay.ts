@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer'
 import { createHash, randomBytes } from 'node:crypto'
 import type { AccountStorage } from './accounts.ts'
-import { dumpRelayRequest } from './dump.ts'
+import { dumpDirectRequest, dumpRelayRequest } from './dump.ts'
 import { relayLog } from './logger.ts'
 
 export type RelayConfig = {
@@ -226,7 +226,7 @@ function createRelayPatch(previous: string, next: string): RelayPatchSet {
 function isRelayableAnthropicRequest(
   input: string | URL | Request,
   body: unknown,
-) {
+): body is string {
   if (typeof body !== 'string') return false
   try {
     const url =
@@ -931,7 +931,23 @@ export async function sendViaRelay(options: {
     affinity: explicitAffinity,
     optimisticResponse,
   } = options
-  if (!config || !isRelayableAnthropicRequest(input, body)) return fallback()
+  const relayable = isRelayableAnthropicRequest(input, body)
+  if (!config || !relayable) {
+    const response = await fallback()
+    if (relayable) {
+      await dumpDirectRequest({
+        affinity:
+          explicitAffinity ??
+          headers.get('x-session-affinity') ??
+          headers.get('x-opencode-session') ??
+          undefined,
+        mode: 'direct',
+        status: response.status,
+        bodyText: body,
+      })
+    }
+    return response
+  }
 
   const affinity =
     explicitAffinity ||
@@ -1011,7 +1027,14 @@ export async function sendViaRelay(options: {
     relayLog(
       `relay failed; falling back direct session=${shortAffinity(affinity)}: ${error instanceof Error ? error.message : String(error)}`,
     )
-    return fallback()
+    const response = await fallback()
+    await dumpDirectRequest({
+      affinity,
+      mode: 'fallback',
+      status: response.status,
+      bodyText,
+    })
+    return response
   }
 }
 

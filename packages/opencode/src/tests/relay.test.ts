@@ -1373,9 +1373,69 @@ describe('relay client', () => {
         systemCount: 1,
         cch: 'abcde',
       })
+      expect(meta.body.stableSystemHash).toBe(meta.body.systemHash)
       expect(
         await readFile(`${getDumpDirectory()}/${bodyPath}`, 'utf8'),
       ).toContain('hello')
+    } finally {
+      resetDumpState()
+      await rm(getDumpDirectory(), { recursive: true, force: true })
+    }
+  })
+
+  test('dump metadata stable system hash ignores billing header cch churn', async () => {
+    await rm(getDumpDirectory(), { recursive: true, force: true })
+    setDumpEnabled(true)
+
+    const bodyWithCch = (cch: string) =>
+      JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        stream: true,
+        system: [
+          {
+            type: 'text',
+            text: `x-anthropic-billing-header: cc_version=2.1.141.67b; cc_entrypoint=sdk-cli; cch=${cch};`,
+          },
+          { type: 'text', text: 'stable system instructions' },
+        ],
+        messages: [
+          { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+        ],
+      })
+
+    try {
+      await sendViaRelay({
+        config: null,
+        input: 'https://api.anthropic.com/v1/messages?beta=true',
+        init: { method: 'POST' },
+        headers: headers('session-direct-dump-stable'),
+        body: bodyWithCch('abcde'),
+        fallback: async () => new Response('direct-ok', { status: 200 }),
+      })
+      await sendViaRelay({
+        config: null,
+        input: 'https://api.anthropic.com/v1/messages?beta=true',
+        init: { method: 'POST' },
+        headers: headers('session-direct-dump-stable'),
+        body: bodyWithCch('fffff'),
+        fallback: async () => new Response('direct-ok', { status: 200 }),
+      })
+
+      const metaPaths = (await readdir(getDumpDirectory()))
+        .filter((file) => file.endsWith('.meta.json'))
+        .sort()
+      expect(metaPaths).toHaveLength(2)
+
+      const first = JSON.parse(
+        await readFile(`${getDumpDirectory()}/${metaPaths[0]}`, 'utf8'),
+      )
+      const second = JSON.parse(
+        await readFile(`${getDumpDirectory()}/${metaPaths[1]}`, 'utf8'),
+      )
+
+      expect(first.body.stableSystemHash).toBeString()
+      expect(second.body.stableSystemHash).toBe(first.body.stableSystemHash)
+      expect(second.body.systemHash).not.toBe(first.body.systemHash)
     } finally {
       resetDumpState()
       await rm(getDumpDirectory(), { recursive: true, force: true })
